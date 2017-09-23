@@ -52,11 +52,7 @@ impl Service for Proxy {
 
         request.set_uri(upstream_uri);
 
-        if let Some(socket_address) = request.remote_addr() {
-            let headers = request.headers_mut();
-            headers.append_raw("X-Forwarded-For", socket_address.ip().to_string());
-            headers.append_raw("X-Forwarded-Port", self.port.to_string());
-        };
+        request = self.set_upstream_request_headers(request);
 
         Either::B(self.client.request(request).then(|result| {
             let our_response = match result {
@@ -130,6 +126,15 @@ impl Proxy {
                 .with_status(StatusCode::BadRequest)
                 .with_body(msg),
         ))
+    }
+
+    fn set_upstream_request_headers(&self, mut request: <Proxy as Service>::Request) -> <Proxy as Service>::Request {
+        if let Some(socket_address) = request.remote_addr() {
+            let headers = request.headers_mut();
+            headers.append_raw("X-Forwarded-For", socket_address.ip().to_string());
+            headers.append_raw("X-Forwarded-Port", self.port.to_string());
+        };
+        request
     }
 }
 
