@@ -13,7 +13,7 @@ use futures::future::{Either, FutureResult};
 use hyper::client::HttpConnector;
 use hyper::client::FutureResponse;
 use hyper::header::Host;
-use hyper::StatusCode;
+use hyper::{StatusCode, Uri};
 use std::sync::mpsc;
 use std::thread;
 use errors::*;
@@ -45,38 +45,9 @@ impl Service for Proxy {
     type Future = Either<DirectResponse, UpstreamResponse>;
 
     fn call(&self, mut request: Request) -> Self::Future {
-        let host = match request.headers().get::<Host>() {
-            None => {
-                return Either::A(futures::future::ok(
-                    Response::new()
-                        .with_status(StatusCode::BadRequest)
-                        .with_body("No host header in request"),
-                ));
-
-            }
-            // Copy the string out of the request to avoid borrow checker
-            // immutability errors later.
-            Some(h) => h.hostname().to_owned(),
-        };
-
-        // Copy the request URI out of the request to avoid borrow checker
-        // immutability errors later.
-        let request_uri = request.uri().to_owned();
-        let upstream_string_uri = "http://".to_string() + &host + ":" +
-            &self.upstream_port.to_string() + request_uri.path();
-
-        let upstream_uri = match upstream_string_uri.parse() {
+        let upstream_uri = match self.upstream_uri(&request) {
             Ok(u) => u,
-            _ => {
-                // We can't actually test this because parsing the URI never
-                // fails. However, should that change at any point this is the
-                // right thing to do.
-                return Either::A(futures::future::ok(
-                    Response::new()
-                        .with_status(StatusCode::BadRequest)
-                        .with_body("Invalid host header in request"),
-                ));
-            }
+            Err(msg) => return self.bad_request(msg),
         };
 
         request.set_uri(upstream_uri);
@@ -122,6 +93,43 @@ impl Service for Proxy {
             };
             futures::future::ok(our_response)
         }))
+    }
+}
+
+impl Proxy {
+    fn upstream_uri(&self, request: &Request) -> std::result::Result<Uri, String> {
+        let host = match request.headers().get::<Host>() {
+            None => return Err("No host header in request".to_string()),
+            // Copy the string out of the request to avoid borrow checker
+            // immutability errors later.
+            Some(h) => h.hostname().to_owned(),
+        };
+
+        // Copy the request URI out of the request to avoid borrow checker
+        // immutability errors later.
+        let request_uri = request.uri().to_owned();
+        let upstream_string_uri = "http://".to_string() + &host + ":" +
+            &self.upstream_port.to_string() + request_uri.path();
+
+        let upstream_uri = match upstream_string_uri.parse() {
+            Ok(u) => u,
+            _ => {
+                // We can't actually test this because parsing the URI never
+                // fails. However, should that change at any point this is the
+                // right thing to do.
+                return Err("Invalid host header in request".to_string())
+            }
+        };
+
+        Ok(upstream_uri)
+    }
+
+    fn bad_request(&self, msg: String) -> <Proxy as Service>::Future {
+        Either::A(futures::future::ok(
+            Response::new()
+                .with_status(StatusCode::BadRequest)
+                .with_body(msg),
+        ))
     }
 }
 
