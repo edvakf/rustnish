@@ -57,27 +57,7 @@ impl Service for Proxy {
         Either::B(self.client.request(request).then(|result| {
             let our_response = match result {
                 Ok(response) => {
-                    let mut headers = response.headers().clone();
-                    let version = match response.version() {
-                        HttpVersion::Http09 => "0.9",
-                        HttpVersion::Http10 => "1.0",
-                        HttpVersion::Http11 => "1.1",
-                        HttpVersion::H2 | HttpVersion::H2c => "2.0",
-                        // Not sure what we should do when we don't know the
-                        // version, this case is probably unreachable code
-                        // anyway.
-                        _ => "?",
-                    };
-                    headers.append_raw("Via", format!("{} rustnish-0.0.1", version));
-
-                    // Append a "Server" header if not already present.
-                    if !headers.has::<hyper::header::Server>() {
-                        headers.set::<hyper::header::Server>(
-                            hyper::header::Server::new("rustnish"),
-                        );
-                    }
-
-                    response.with_headers(headers)
+                    Self::set_response_headers(response)
                 }
                 Err(_) => {
                     // For security reasons do not show the exact error to end users.
@@ -135,6 +115,29 @@ impl Proxy {
             headers.append_raw("X-Forwarded-Port", self.port.to_string());
         };
         request
+    }
+
+    fn set_response_headers(response: <Proxy as Service>::Response) -> <Proxy as Service>::Response {
+        let mut headers = response.headers().clone();
+        let version = match response.version() {
+            HttpVersion::Http09 => "0.9",
+            HttpVersion::Http10 => "1.0",
+            HttpVersion::Http11 => "1.1",
+            HttpVersion::H2 | HttpVersion::H2c => "2.0",
+            // Not sure what we should do when we don't know the
+            // version, this case is probably unreachable code
+            // anyway.
+            _ => "?",
+        };
+        headers.append_raw("Via", format!("{} rustnish-0.0.1", version));
+
+        // Append a "Server" header if not already present.
+        if !headers.has::<hyper::header::Server>() {
+            headers.set::<hyper::header::Server>(
+                hyper::header::Server::new("rustnish"),
+            );
+        }
+        response.with_headers(headers)
     }
 }
 
